@@ -25,6 +25,13 @@ public sealed class TicketsController : ControllerBase
         return CreatedAtAction(nameof(Get), new { id = ticket.Id }, ticket);
     }
 
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<TicketResponse>>> GetAll(CancellationToken cancellationToken)
+    {
+        var tickets = await _ticketService.GetTicketsAsync(cancellationToken);
+        return Ok(tickets);
+    }
+
     [HttpPost("{id:guid}/tags")]
     public async Task<ActionResult<TicketResponse>> AttachTag(Guid id, [FromBody] TagRequest request, CancellationToken cancellationToken)
     {

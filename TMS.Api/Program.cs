@@ -24,17 +24,16 @@ builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<TMS.Application.Services.TicketService>();
 
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? Array.Empty<string>();
+
 // Allow the Blazor WASM host to call the API (adjust origins as needed)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(CorsPolicy, policy =>
     {
         policy
-            .WithOrigins(
-                "https://localhost:5001", // API default dev URL
-                "http://localhost:5001",
-                "https://localhost:5002", // Blazor dev URL (if using separate port)
-                "http://localhost:5002")
+            .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

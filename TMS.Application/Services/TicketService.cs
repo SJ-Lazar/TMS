@@ -78,6 +78,17 @@ public sealed class TicketService
         return MapToResponse(ticket, assignedName);
     }
 
+    public async Task<IReadOnlyList<TicketResponse>> GetTicketsAsync(CancellationToken cancellationToken = default)
+    {
+        var tickets = await _ticketRepository.GetAllAsync(cancellationToken);
+        var members = await _memberRepository.GetActiveMembersAsync(cancellationToken);
+
+        return tickets
+            .Select(t => MapToResponse(t, GetAssignedSupportMemberName(t.AssignedSupportMemberId, members)))
+            .OrderByDescending(t => t.CreatedAtUtc)
+            .ToList();
+    }
+
     public async Task<TicketResponse?> DetachTagAsync(Guid ticketId, Guid tagId, CancellationToken cancellationToken = default)
     {
         var ticket = await _ticketRepository.DetachTagAsync(ticketId, tagId, cancellationToken);

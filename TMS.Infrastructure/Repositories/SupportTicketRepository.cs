@@ -82,6 +82,15 @@ public sealed class SupportTicketRepository : ISupportTicketRepository
         return new TicketDashboardStats(total, inProgress, unresolved);
     }
 
+    public async Task<IReadOnlyList<SupportTicket>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Tickets
+            .Include(t => t.Tags)
+            .AsNoTracking()
+            .OrderByDescending(t => t.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<SupportTicket?> FindByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);

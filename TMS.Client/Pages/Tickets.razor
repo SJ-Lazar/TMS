@@ -1,0 +1,158 @@
+@page "/tickets"
+@inject HttpClient Http
+
+<h1>Tickets</h1>
+<p class="hint">View tickets grouped by status.</p>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_loading)
+{
+    <div>Loading…</div>
+}
+else if (_tickets is null)
+{
+    <div>No tickets found.</div>
+}
+else
+{
+    <div class="lanes">
+        @foreach (var group in _tickets.GroupBy(t => t.Status).OrderBy(g => g.Key))
+        {
+            <div class="lane">
+                <div class="lane-header">@group.Key (@group.Count())</div>
+                @foreach (var ticket in group)
+                {
+                    <div class="card glass ticket-card">
+                        <div class="ticket-title">@ticket.Title</div>
+                        <div class="hint">@ticket.RequesterName · @ticket.CreatedAtUtc.ToLocalTime().ToString("g")</div>
+                        <div class="ticket-desc">@ticket.Description</div>
+                        @if (ticket.Tags is { Count: > 0 })
+                        {
+                            <div class="tags">
+                                @foreach (var tag in ticket.Tags)
+                                {
+                                    <span class="tag">@tag</span>
+                                }
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(ticket.AttachmentFileName))
+                        {
+                            <div class="hint">Attachment: @ticket.AttachmentFileName (@ticket.AttachmentContentType)</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(ticket.AssignedSupportMember))
+                        {
+                            <div class="hint">Assigned to: @ticket.AssignedSupportMember</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<TicketResponse>? _tickets;
+    private bool _loading;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTicketsAsync();
+    }
+
+    private async Task LoadTicketsAsync()
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var response = await Http.GetAsync("api/tickets");
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = $"Failed to load tickets: {(int)response.StatusCode} {response.ReasonPhrase}";
+                return;
+            }
+
+            _tickets = await response.Content.ReadFromJsonAsync<List<TicketResponse>>();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    public sealed class TicketResponse
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string RequesterName { get; set; } = string.Empty;
+        public DateTime CreatedAtUtc { get; set; }
+        public string AssignedSupportMember { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? AttachmentFileName { get; set; }
+        public string? AttachmentContentType { get; set; }
+        public string? AttachmentBase64 { get; set; }
+        public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+    }
+}
+
+<style>
+.lanes {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.lane {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lane-header {
+    font-weight: 650;
+    margin-bottom: 4px;
+}
+
+.ticket-card {
+    padding: 12px;
+}
+
+.ticket-title {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.ticket-desc {
+    margin: 6px 0;
+}
+
+.tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+}
+
+.tag {
+    background: #eef;
+    border-radius: 12px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+</style>
