@@ -15,6 +15,7 @@ public sealed class TmsDbContext : DbContext
     public DbSet<SupportMember> SupportMembers => Set<SupportMember>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<TicketComment> TicketComments => Set<TicketComment>();
 
     public TmsDbContext(DbContextOptions<TmsDbContext> options) : base(options)
     {
@@ -62,6 +63,12 @@ public sealed class TmsDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             builder
+                .HasMany(t => t.Comments)
+                .WithOne()
+                .HasForeignKey(c => c.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder
                 .HasMany(t => t.Tags)
                 .WithMany(t => t.Tickets)
                 .UsingEntity<Dictionary<string, object>>("TicketTags",
@@ -69,6 +76,10 @@ public sealed class TmsDbContext : DbContext
                     j => j.HasOne<SupportTicket>().WithMany().HasForeignKey("TicketId").OnDelete(DeleteBehavior.Cascade),
                     j => j.HasKey("TicketId", "TagId"));
             builder.Navigation(t => t.Tags).AutoInclude(false);
+            builder.Navigation(t => t.Comments)
+                .HasField("_comments")
+                .UsePropertyAccessMode(PropertyAccessMode.Field)
+                .AutoInclude(false);
         });
 
         modelBuilder.Entity<Tag>(builder =>
@@ -77,6 +88,14 @@ public sealed class TmsDbContext : DbContext
             builder.Property(t => t.Name).HasMaxLength(100).IsRequired();
             builder.HasIndex(t => t.Name).IsUnique();
             builder.Navigation(t => t.Tickets).AutoInclude(false);
+        });
+
+        modelBuilder.Entity<TicketComment>(builder =>
+        {
+            builder.HasKey(c => c.Id);
+            builder.Property(c => c.AuthorName).HasMaxLength(200).IsRequired();
+            builder.Property(c => c.Message).HasMaxLength(2000).IsRequired();
+            builder.Property(c => c.CreatedAtUtc).IsRequired();
         });
 
         modelBuilder.Entity<AuditLog>(builder =>

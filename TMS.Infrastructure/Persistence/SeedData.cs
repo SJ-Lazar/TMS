@@ -34,8 +34,32 @@ public static class SeedData
             return;
         }
 
-        var assignee = await dbContext.SupportMembers.FirstOrDefaultAsync(cancellationToken);
-        if (assignee is null)
+        var members = await dbContext.SupportMembers.ToListAsync(cancellationToken);
+
+        // Create 5 seed tickets without tags; tag tests are handled elsewhere.
+        var tickets = new List<SupportTicket>
+        {
+            SupportTicket.Create("Login issue", "Cannot log into the portal.", "Mia", DateTime.UtcNow.AddHours(-6)),
+            SupportTicket.Create("Payment failed", "Payment is failing with code 402.", "Noah", DateTime.UtcNow.AddHours(-12)),
+            SupportTicket.Create("Slow reports", "Reports are timing out.", "Olivia", DateTime.UtcNow.AddHours(-2)),
+            SupportTicket.Create("Email bounce", "Emails are bouncing for certain domains.", "Liam", DateTime.UtcNow.AddHours(-30)),
+            SupportTicket.Create("Mobile crash", "App crashes on launch.", "Emma", DateTime.UtcNow.AddHours(-1))
+        };
+
+        for (int i = 0; i < tickets.Count; i++)
+        {
+            var seedAssignee = members[i % Math.Max(1, members.Count)];
+            tickets[i].Assign(seedAssignee.Id);
+
+            // Add a starter comment for sample data
+            tickets[i].AddComment("System", "Ticket created.", DateTime.UtcNow.AddHours(-i - 1));
+        }
+
+        await dbContext.Tickets.AddRangeAsync(tickets, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var firstAssignee = await dbContext.SupportMembers.FirstOrDefaultAsync(cancellationToken);
+        if (firstAssignee is null)
         {
             return;
         }
@@ -46,7 +70,7 @@ public static class SeedData
             "Jordan",
             DateTime.UtcNow.AddDays(-2));
         ticket1.AttachFile("vpn-instructions.txt", "text/plain", System.Text.Encoding.UTF8.GetBytes("VPN steps..."));
-        ticket1.Assign(assignee.Id);
+        ticket1.Assign(firstAssignee.Id);
 
         var ticket2 = SupportTicket.Create(
             "Broken laptop",
@@ -54,7 +78,7 @@ public static class SeedData
             "Riley",
             DateTime.UtcNow.AddDays(-1));
         ticket2.AttachFile("screen-photo.jpg", "image/jpeg", GeneratePlaceholderBytes());
-        ticket2.Assign(assignee.Id);
+        ticket2.Assign(firstAssignee.Id);
         ticket2.Resolve();
 
         var networking = Tag.Create("Networking");

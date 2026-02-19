@@ -6,6 +6,7 @@ using TMS.Application.Contracts;
 using TMS.Application.Services;
 using TMS.Domain.Abstractions;
 using TMS.Domain.Entities;
+using TMS.Domain.Enums;
 using NUnit.Framework;
 
 namespace TMS.Tests;
@@ -71,10 +72,11 @@ public class TicketServiceTests
         public DateTime UtcNow => new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     }
 
-    private sealed class InMemoryTicketRepository : ISupportTicketRepository
+        private sealed class InMemoryTicketRepository : ISupportTicketRepository
     {
         private readonly List<SupportTicket> _tickets = new();
         private readonly List<Tag> _tags = new();
+            private readonly List<TicketComment> _comments = new();
 
         public Task AddAsync(SupportTicket ticket, IEnumerable<string>? tags = null, CancellationToken cancellationToken = default)
         {
@@ -104,16 +106,22 @@ public class TicketServiceTests
         public Task<IReadOnlyList<SupportTicket>> GetOpenTicketsAsync(CancellationToken cancellationToken = default)
         {
             IReadOnlyList<SupportTicket> open = _tickets
-                .Where(t => t.Status == Domain.Enums.TicketStatus.Open || t.Status == Domain.Enums.TicketStatus.InProgress)
+                .Where(t => t.Status == TicketStatus.Open || t.Status == TicketStatus.InProgress)
                 .ToList();
             return Task.FromResult(open);
+        }
+
+        public Task<IReadOnlyList<SupportTicket>> GetAllAsync(CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<SupportTicket> all = _tickets.ToList();
+            return Task.FromResult(all);
         }
 
         public Task<TicketDashboardStats> GetDashboardStatsAsync(CancellationToken cancellationToken = default)
         {
             var total = _tickets.Count;
-            var inProgress = _tickets.Count(t => t.Status == Domain.Enums.TicketStatus.InProgress);
-            var unresolved = _tickets.Count(t => t.Status == Domain.Enums.TicketStatus.Open || t.Status == Domain.Enums.TicketStatus.InProgress);
+            var inProgress = _tickets.Count(t => t.Status == TicketStatus.InProgress);
+            var unresolved = _tickets.Count(t => t.Status == TicketStatus.Open || t.Status == TicketStatus.InProgress);
             return Task.FromResult(new TicketDashboardStats(total, inProgress, unresolved));
         }
 
@@ -124,7 +132,7 @@ public class TicketServiceTests
             return Task.FromResult(ticket);
         }
 
-        public Task<SupportTicket?> GetByIdAsync(Guid id, bool includeTags = false, CancellationToken cancellationToken = default)
+        public Task<SupportTicket?> GetByIdAsync(Guid id, bool includeTags = false, bool includeComments = false, CancellationToken cancellationToken = default)
         {
             var ticket = _tickets.FirstOrDefault(t => t.Id == id);
             return Task.FromResult(ticket);
@@ -153,6 +161,41 @@ public class TicketServiceTests
             var ticket = _tickets.FirstOrDefault(t => t.Id == ticketId);
             ticket?.RemoveTag(tagId);
             return Task.FromResult(ticket);
+        }
+
+        public Task<SupportTicket?> UpdateAsync(Guid id, string title, string description, TicketStatus status, byte[]? attachmentBytes = null, string? attachmentFileName = null, string? attachmentContentType = null, CancellationToken cancellationToken = default)
+        {
+            var ticket = _tickets.FirstOrDefault(t => t.Id == id);
+            if (ticket is null)
+            {
+                return Task.FromResult<SupportTicket?>(null);
+            }
+
+            ticket.UpdateDetails(title, description);
+            ticket.ChangeStatus(status);
+
+            if (attachmentBytes is not null)
+            {
+                var fileName = string.IsNullOrWhiteSpace(attachmentFileName) ? "attachment" : attachmentFileName;
+                var contentType = string.IsNullOrWhiteSpace(attachmentContentType) ? "application/octet-stream" : attachmentContentType;
+                ticket.AttachFile(fileName, contentType, attachmentBytes);
+            }
+
+            return Task.FromResult<SupportTicket?>(ticket);
+        }
+
+        public Task<TicketComment?> AddCommentAsync(Guid ticketId, string authorName, string message, DateTime createdAtUtc, CancellationToken cancellationToken = default)
+        {
+            var ticket = _tickets.FirstOrDefault(t => t.Id == ticketId);
+            if (ticket is null)
+            {
+                return Task.FromResult<TicketComment?>(null);
+            }
+
+            ticket.AddComment(authorName, message, createdAtUtc);
+            var comment = ticket.Comments.Last();
+            _comments.Add(comment);
+            return Task.FromResult<TicketComment?>(comment);
         }
     }
 

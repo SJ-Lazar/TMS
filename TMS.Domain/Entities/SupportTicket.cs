@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using TMS.Domain.Enums;
@@ -7,6 +8,7 @@ namespace TMS.Domain.Entities;
 public sealed class SupportTicket
 {
     private readonly List<Tag> _tags = new();
+    private readonly List<TicketComment> _comments = new();
 
     public Guid Id { get; private set; }
     public string Title { get; private set; }
@@ -20,7 +22,8 @@ public sealed class SupportTicket
     public byte[]? AttachmentBytes { get; private set; }
     public string? IdempotencyKey { get; private set; }
     public byte[]? RowVersion { get; private set; }
-    public IReadOnlyCollection<Tag> Tags => _tags.AsReadOnly();
+    public IReadOnlyCollection<Tag> Tags => _tags;
+    public IReadOnlyCollection<TicketComment> Comments => _comments;
 
     private SupportTicket()
     {
@@ -53,6 +56,11 @@ public sealed class SupportTicket
 
     public void AttachFile(string fileName, string contentType, byte[] data)
     {
+        if (Status == TicketStatus.Closed)
+        {
+            throw new InvalidOperationException("Closed tickets cannot be edited.");
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
         ArgumentNullException.ThrowIfNull(data);
@@ -110,5 +118,42 @@ public sealed class SupportTicket
         }
 
         _tags.Remove(tag);
+    }
+
+    public void AddComment(string authorName, string message, DateTime createdAtUtc)
+    {
+        if (Status == TicketStatus.Closed)
+        {
+            throw new InvalidOperationException("Closed tickets cannot be edited.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(authorName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+
+        _comments.Add(TicketComment.Create(Id, authorName, message, createdAtUtc));
+    }
+
+    public void UpdateDetails(string title, string description)
+    {
+        if (Status == TicketStatus.Closed)
+        {
+            throw new InvalidOperationException("Closed tickets cannot be edited.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+
+        Title = title;
+        Description = description;
+    }
+
+    public void ChangeStatus(TicketStatus status)
+    {
+        if (Status == TicketStatus.Closed)
+        {
+            throw new InvalidOperationException("Closed tickets cannot be edited.");
+        }
+
+        Status = status;
     }
 }

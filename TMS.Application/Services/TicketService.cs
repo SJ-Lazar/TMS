@@ -5,6 +5,7 @@ using TMS.Application.Abstractions;
 using TMS.Application.Contracts;
 using TMS.Domain.Abstractions;
 using TMS.Domain.Entities;
+using TMS.Domain.Enums;
 
 namespace TMS.Application.Services;
 
@@ -102,6 +103,67 @@ public sealed class TicketService
         return MapToResponse(ticket, assignedName);
     }
 
+    public async Task<TicketResponse?> GetTicketAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var ticket = await _ticketRepository.GetByIdAsync(id, includeTags: true, includeComments: true, cancellationToken: cancellationToken);
+        if (ticket is null)
+        {
+            return null;
+        }
+
+        var members = await _memberRepository.GetActiveMembersAsync(cancellationToken);
+        var assignedName = GetAssignedSupportMemberName(ticket.AssignedSupportMemberId, members);
+        return MapToResponse(ticket, assignedName);
+    }
+
+    public async Task<TicketResponse?> UpdateTicketAsync(Guid id, UpdateTicketRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!Enum.TryParse<TicketStatus>(request.Status, ignoreCase: true, out var status))
+        {
+            throw new ArgumentException($"Invalid status '{request.Status}'", nameof(request.Status));
+        }
+
+        byte[]? attachmentBytes = null;
+        if (!string.IsNullOrWhiteSpace(request.AttachmentBase64))
+        {
+            attachmentBytes = Convert.FromBase64String(request.AttachmentBase64);
+        }
+
+        var ticket = await _ticketRepository.UpdateAsync(id, request.Title, request.Description, status, attachmentBytes, request.AttachmentFileName, request.AttachmentContentType, cancellationToken);
+        if (ticket is null)
+        {
+            return null;
+        }
+
+        var members = await _memberRepository.GetActiveMembersAsync(cancellationToken);
+        var assignedName = GetAssignedSupportMemberName(ticket.AssignedSupportMemberId, members);
+        return MapToResponse(ticket, assignedName);
+    }
+
+    public async Task<TicketResponse?> AddCommentAsync(Guid ticketId, CreateCommentRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var comment = await _ticketRepository.AddCommentAsync(ticketId, request.AuthorName, request.Message, _clock.UtcNow, cancellationToken);
+        if (comment is null)
+        {
+            return null;
+        }
+
+        // Return the refreshed ticket with comments to keep clients in sync.
+        var ticket = await _ticketRepository.GetByIdAsync(ticketId, includeTags: true, includeComments: true, cancellationToken: cancellationToken);
+        if (ticket is null)
+        {
+            return null;
+        }
+
+        var members = await _memberRepository.GetActiveMembersAsync(cancellationToken);
+        var assignedName = GetAssignedSupportMemberName(ticket.AssignedSupportMemberId, members);
+        return MapToResponse(ticket, assignedName);
+    }
+
     private static SupportMember SelectAssignee(IReadOnlyList<SupportMember> members, IReadOnlyList<SupportTicket> openTickets)
     {
         var load = members.ToDictionary(m => m.Id, _ => 0);
@@ -143,7 +205,17 @@ public sealed class TicketService
             AttachmentBase64 = ticket.AttachmentBytes is null ? null : Convert.ToBase64String(ticket.AttachmentBytes),
             IdempotencyKey = ticket.IdempotencyKey,
             ConcurrencyToken = ticket.RowVersion is null ? null : Convert.ToBase64String(ticket.RowVersion),
-            Tags = ticket.Tags.Select(t => t.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()
+            Tags = ticket.Tags.Select(t => t.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList(),
+            Comments = ticket.Comments
+                .OrderByDescending(c => c.CreatedAtUtc)
+                .Select(c => new TicketCommentResponse
+                {
+                    Id = c.Id,
+                    AuthorName = c.AuthorName,
+                    Message = c.Message,
+                    CreatedAtUtc = c.CreatedAtUtc
+                })
+                .ToList()
         };
     }
 }

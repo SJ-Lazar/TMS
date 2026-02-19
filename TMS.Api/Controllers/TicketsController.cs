@@ -69,10 +69,53 @@ public sealed class TicketsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    public ActionResult Get(Guid id)
+    public async Task<ActionResult<TicketResponse>> Get(Guid id, CancellationToken cancellationToken)
     {
-        // Placeholder for retrieving ticket by id; not required for auto-assignment scenario yet.
-        return NotFound();
+        var ticket = await _ticketService.GetTicketAsync(id, cancellationToken);
+        if (ticket is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(ticket);
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<TicketResponse>> Update(Guid id, [FromBody] UpdateTicketRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var ticket = await _ticketService.UpdateTicketAsync(id, request, cancellationToken);
+            if (ticket is null)
+            {
+                return NotFound();
+            }
+
+            return Ok(ticket);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    [HttpPost("{id:guid}/comments")]
+    public async Task<ActionResult<TicketResponse>> AddComment(Guid id, [FromBody] CreateCommentRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var comment = await _ticketService.AddCommentAsync(id, request, cancellationToken);
+            if (comment is null)
+            {
+                return NotFound();
+            }
+
+            return Ok(comment);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
     }
 
     public sealed record DashboardResponse(int TotalTickets, int InProgressTickets, int UnresolvedTickets);

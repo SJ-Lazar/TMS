@@ -18,4 +18,13 @@ public sealed class TicketResponse
     public string? IdempotencyKey { get; init; }
     public string? ConcurrencyToken { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<TicketCommentResponse> Comments { get; init; } = Array.Empty<TicketCommentResponse>();
+}
+
+public sealed class TicketCommentResponse
+{
+    public Guid Id { get; init; }
+    public string AuthorName { get; init; } = string.Empty;
+    public string Message { get; init; } = string.Empty;
+    public DateTime CreatedAtUtc { get; init; }
 }

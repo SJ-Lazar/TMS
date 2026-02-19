@@ -101,13 +101,18 @@ public sealed class SupportTicketRepository : ISupportTicketRepository
             .FirstOrDefaultAsync(t => t.IdempotencyKey == idempotencyKey, cancellationToken);
     }
 
-    public async Task<SupportTicket?> GetByIdAsync(Guid id, bool includeTags = false, CancellationToken cancellationToken = default)
+    public async Task<SupportTicket?> GetByIdAsync(Guid id, bool includeTags = false, bool includeComments = false, CancellationToken cancellationToken = default)
     {
         IQueryable<SupportTicket> query = _dbContext.Tickets;
 
         if (includeTags)
         {
             query = query.Include(t => t.Tags);
+        }
+
+        if (includeComments)
+        {
+            query = query.Include(t => t.Comments);
         }
 
         return await query.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
@@ -153,5 +158,54 @@ public sealed class SupportTicketRepository : ISupportTicketRepository
         ticket.RemoveTag(tagId);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return ticket;
+    }
+
+    public async Task<SupportTicket?> UpdateAsync(Guid id, string title, string description, TicketStatus status, byte[]? attachmentBytes = null, string? attachmentFileName = null, string? attachmentContentType = null, CancellationToken cancellationToken = default)
+    {
+        var ticket = await _dbContext.Tickets
+            .Include(t => t.Tags)
+            .Include(t => t.Comments)
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+
+        if (ticket is null)
+        {
+            return null;
+        }
+
+        ticket.UpdateDetails(title, description);
+        ticket.ChangeStatus(status);
+
+        if (attachmentBytes is not null)
+        {
+            var fileName = string.IsNullOrWhiteSpace(attachmentFileName) ? "attachment" : attachmentFileName;
+            var contentType = string.IsNullOrWhiteSpace(attachmentContentType) ? "application/octet-stream" : attachmentContentType;
+            ticket.AttachFile(fileName, contentType, attachmentBytes);
+        }
+
+        _dbContext.AuditLogs.Add(AuditLog.Create(ticket.Id, "Updated", $"Ticket '{ticket.Title}' updated.", DateTime.UtcNow));
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return ticket;
+    }
+
+    public async Task<TicketComment?> AddCommentAsync(Guid ticketId, string authorName, string message, DateTime createdAtUtc, CancellationToken cancellationToken = default)
+    {
+        var ticket = await _dbContext.Tickets
+            .Include(t => t.Comments)
+            .FirstOrDefaultAsync(t => t.Id == ticketId, cancellationToken);
+
+        if (ticket is null)
+        {
+            return null;
+        }
+
+        ticket.AddComment(authorName, message, createdAtUtc);
+
+        var comment = ticket.Comments.Last();
+
+        _dbContext.AuditLogs.Add(AuditLog.Create(ticket.Id, "Commented", $"Comment added by '{authorName}'.", DateTime.UtcNow));
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return comment;
     }
 }

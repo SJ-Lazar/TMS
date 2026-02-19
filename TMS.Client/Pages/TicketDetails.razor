@@ -1,0 +1,379 @@
+@page "/tickets/{Id:guid}"
+@using System.ComponentModel.DataAnnotations
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<h1>Ticket</h1>
+<p class="hint"><a href="/tickets">? Back to tickets</a></p>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_saveMessage is not null)
+{
+    <div class="alert alert-success">@_saveMessage</div>
+}
+
+@if (_loading)
+{
+    <div>Loading…</div>
+}
+else if (_ticket is null)
+{
+    <div>Ticket not found.</div>
+}
+else
+{
+    <div class="glass card" style="margin-bottom:16px;">
+        <div class="hint">Created</div>
+        <div>@_ticket.CreatedAtUtc.ToLocalTime().ToString("f")</div>
+        @if (!string.IsNullOrWhiteSpace(_ticket.AssignedSupportMember))
+        {
+            <div class="hint" style="margin-top:8px;">Assigned to</div>
+            <div>@_ticket.AssignedSupportMember</div>
+        }
+        @if (_ticket.Tags is { Count: > 0 })
+        {
+            <div class="hint" style="margin-top:8px;">Tags</div>
+            <div class="tags">@string.Join(", ", _ticket.Tags)</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_ticket.AttachmentFileName))
+        {
+            <div class="hint" style="margin-top:8px;">Attachment</div>
+            <div>@_ticket.AttachmentFileName (@_ticket.AttachmentContentType)</div>
+        }
+    </div>
+
+    <EditForm Model="_editModel" OnValidSubmit="SaveAsync">
+        <DataAnnotationsValidator />
+        <div class="glass card">
+            <div class="form">
+                <div class="field">
+                    <label class="label" for="title">Title</label>
+                    <InputText id="title" class="input" @bind-Value="_editModel.Title" disabled="@IsClosed" />
+                    <ValidationMessage class="validation" For="() => _editModel.Title" />
+                </div>
+
+                <div class="field">
+                    <label class="label" for="desc">Description</label>
+                    <InputTextArea id="desc" class="input" @bind-Value="_editModel.Description" disabled="@IsClosed" />
+                    <ValidationMessage class="validation" For="() => _editModel.Description" />
+                </div>
+
+                <div class="field">
+                    <label class="label" for="status">Status</label>
+                    <InputSelect id="status" class="input" @bind-Value="_editModel.Status" disabled="@IsClosed">
+                        @foreach (var status in _statusOptions)
+                        {
+                            <option value="@status">@status</option>
+                        }
+                    </InputSelect>
+                </div>
+
+                <div class="field">
+                    <label class="label" for="attachment">Attachment</label>
+                    <InputFile id="attachment" OnChange="OnFileSelectedAsync" disabled="@IsClosed" />
+                    @if (!string.IsNullOrWhiteSpace(_attachmentFileName))
+                    {
+                        <div class="hint" style="margin-top:4px;">Selected: @_attachmentFileName</div>
+                    }
+                    @if (_attachmentError is not null)
+                    {
+                        <div class="alert alert-danger" style="margin-top:6px;">@_attachmentError</div>
+                    }
+                </div>
+
+                <div class="field">
+                    <label class="label" for="comment">Add comment</label>
+                    <InputText id="comment" class="input" @bind-Value="_newComment" disabled="@IsClosed" />
+                    <div class="hint">Comments are saved with your name.</div>
+                </div>
+
+                <div style="display:flex; gap:10px; align-items:center; margin-top:6px;">
+                    <button class="btn btn-primary" type="submit" disabled="@(_saving || IsClosed)">
+                        @(_saving ? "Saving…" : "Save changes")
+                    </button>
+                    <button class="btn" type="button" @onclick="AddCommentAsync" disabled="@(_commentSubmitting || IsClosed || string.IsNullOrWhiteSpace(_newComment))">@(_commentSubmitting ? "Posting…" : "Add comment")</button>
+                    <button class="btn" type="button" @onclick="NavigateBack">Back to tickets</button>
+                    @if (IsClosed)
+                    {
+                        <span class="hint">Closed tickets cannot be edited.</span>
+                    }
+                </div>
+            </div>
+        </div>
+    </EditForm>
+
+    @if (_ticket.Comments is not null && _ticket.Comments.Count > 0)
+    {
+        <div class="glass card" style="margin-top:12px;">
+            <div class="hint">Comments</div>
+            <ul class="comment-list">
+                @foreach (var comment in _ticket.Comments)
+                {
+                    <li>
+                        <div class="comment-header">@comment.AuthorName · @comment.CreatedAtUtc.ToLocalTime().ToString("g")</div>
+                        <div>@comment.Message</div>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private TicketResponse? _ticket;
+    private TicketEditModel _editModel = new();
+    private bool _loading;
+    private bool _saving;
+    private bool _commentSubmitting;
+    private string? _error;
+    private string? _saveMessage;
+    private string _newComment = string.Empty;
+    private string _commentAuthor = string.Empty;
+    private string? _attachmentFileName;
+    private string? _attachmentContentType;
+    private string? _attachmentBase64;
+    private string? _attachmentError;
+    private readonly string[] _statusOptions = new[] { "Open", "InProgress", "Resolved", "Closed" };
+
+    private bool IsClosed => string.Equals(_ticket?.Status, "Closed", StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _saveMessage = null;
+
+        try
+        {
+            _ticket = await Http.GetFromJsonAsync<TicketResponse>($"api/tickets/{Id}");
+            if (_ticket is not null)
+            {
+                _editModel = new TicketEditModel
+                {
+                    Title = _ticket.Title,
+                    Description = _ticket.Description,
+                    Status = _ticket.Status
+                };
+                _commentAuthor = _ticket.RequesterName;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_ticket is null || IsClosed)
+        {
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        _saveMessage = null;
+
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/tickets/{Id}", new UpdateTicketRequest
+            {
+                Title = _editModel.Title,
+                Description = _editModel.Description,
+                Status = _editModel.Status,
+                AttachmentBase64 = _attachmentBase64,
+                AttachmentContentType = _attachmentContentType,
+                AttachmentFileName = _attachmentFileName
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = $"Update failed: {(int)response.StatusCode} {response.ReasonPhrase}";
+                return;
+            }
+
+            _ticket = await response.Content.ReadFromJsonAsync<TicketResponse>();
+            if (_ticket is not null)
+            {
+                _editModel = new TicketEditModel
+                {
+                    Title = _ticket.Title,
+                    Description = _ticket.Description,
+                    Status = _ticket.Status
+                };
+                _saveMessage = "Changes saved.";
+                _attachmentBase64 = null;
+                _attachmentContentType = null;
+                _attachmentFileName = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _attachmentError = null;
+        var file = e.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = file.OpenReadStream(5 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _attachmentBase64 = Convert.ToBase64String(ms.ToArray());
+            _attachmentFileName = file.Name;
+            _attachmentContentType = file.ContentType;
+        }
+        catch (Exception ex)
+        {
+            _attachmentError = ex.Message;
+        }
+    }
+
+    private async Task AddCommentAsync()
+    {
+        if (IsClosed || string.IsNullOrWhiteSpace(_newComment))
+        {
+            return;
+        }
+
+        _commentSubmitting = true;
+        _error = null;
+        _saveMessage = null;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/tickets/{Id}/comments", new CreateCommentRequest
+            {
+                AuthorName = string.IsNullOrWhiteSpace(_commentAuthor) ? "User" : _commentAuthor,
+                Message = _newComment
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = $"Comment failed: {(int)response.StatusCode} {response.ReasonPhrase}";
+                return;
+            }
+
+            var ticket = await response.Content.ReadFromJsonAsync<TicketResponse>();
+            if (ticket is not null)
+            {
+                _ticket = ticket;
+                _newComment = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _commentSubmitting = false;
+        }
+    }
+
+    private void NavigateBack()
+    {
+        Navigation.NavigateTo("/tickets");
+    }
+
+    private sealed class TicketEditModel
+    {
+        [Required]
+        [MaxLength(200)]
+        public string Title { get; set; } = string.Empty;
+
+        [Required]
+        [MaxLength(2000)]
+        public string Description { get; set; } = string.Empty;
+
+        [Required]
+        public string Status { get; set; } = "Open";
+    }
+
+    private sealed class TicketResponse
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string RequesterName { get; set; } = string.Empty;
+        public DateTime CreatedAtUtc { get; set; }
+        public string AssignedSupportMember { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? AttachmentFileName { get; set; }
+        public string? AttachmentContentType { get; set; }
+        public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+        public IReadOnlyList<TicketCommentResponse> Comments { get; set; } = Array.Empty<TicketCommentResponse>();
+    }
+
+    private sealed class UpdateTicketRequest
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? AttachmentFileName { get; set; }
+        public string? AttachmentContentType { get; set; }
+        public string? AttachmentBase64 { get; set; }
+    }
+
+    private sealed record TicketCommentResponse
+    {
+        public Guid Id { get; init; }
+        public string AuthorName { get; init; } = string.Empty;
+        public string Message { get; init; } = string.Empty;
+        public DateTime CreatedAtUtc { get; init; }
+    }
+
+    private sealed class CreateCommentRequest
+    {
+        public string AuthorName { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+    }
+}
+
+<style>
+    .tags {
+        margin-top: 4px;
+    }
+
+    .comment-list {
+        list-style: none;
+        padding: 0;
+        margin: 8px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .comment-header {
+        font-weight: 600;
+        font-size: 14px;
+    }
+</style>

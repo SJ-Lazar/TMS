@@ -26,28 +26,30 @@ else
                 <div class="lane-header">@group.Key (@group.Count())</div>
                 @foreach (var ticket in group)
                 {
-                    <div class="card glass ticket-card">
-                        <div class="ticket-title">@ticket.Title</div>
-                        <div class="hint">@ticket.RequesterName · @ticket.CreatedAtUtc.ToLocalTime().ToString("g")</div>
-                        <div class="ticket-desc">@ticket.Description</div>
-                        @if (ticket.Tags is { Count: > 0 })
-                        {
-                            <div class="tags">
-                                @foreach (var tag in ticket.Tags)
-                                {
-                                    <span class="tag">@tag</span>
-                                }
-                            </div>
-                        }
-                        @if (!string.IsNullOrWhiteSpace(ticket.AttachmentFileName))
-                        {
-                            <div class="hint">Attachment: @ticket.AttachmentFileName (@ticket.AttachmentContentType)</div>
-                        }
-                        @if (!string.IsNullOrWhiteSpace(ticket.AssignedSupportMember))
-                        {
-                            <div class="hint">Assigned to: @ticket.AssignedSupportMember</div>
-                        }
-                    </div>
+                    <a class="ticket-card-link" href="@($"/tickets/{ticket.Id}")">
+                        <div class="card glass ticket-card">
+                            <div class="ticket-title">@ticket.Title</div>
+                            <div class="hint">@ticket.RequesterName · @ticket.CreatedAtUtc.ToLocalTime().ToString("g")</div>
+                            <div class="ticket-desc">@ticket.Description</div>
+                            @if (ticket.Tags is { Count: > 0 })
+                            {
+                                <div class="tags">
+                                    @foreach (var tag in ticket.Tags)
+                                    {
+                                        <span class="tag">@tag</span>
+                                    }
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(ticket.AttachmentFileName))
+                            {
+                                <div class="hint">Attachment: @ticket.AttachmentFileName (@ticket.AttachmentContentType)</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(ticket.AssignedSupportMember))
+                            {
+                                <div class="hint">Assigned to: @ticket.AssignedSupportMember</div>
+                            }
+                        </div>
+                    </a>
                 }
             </div>
         }
@@ -140,6 +142,21 @@ else
 
 .ticket-desc {
     margin: 6px 0;
+}
+
+.ticket-card-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.ticket-card-link .card {
+    height: 100%;
+    transition: transform 0.05s ease, box-shadow 0.1s ease;
+}
+
+.ticket-card-link:hover .card {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
 }
 
 .tags {
