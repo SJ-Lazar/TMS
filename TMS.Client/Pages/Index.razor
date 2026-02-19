@@ -1,0 +1,361 @@
+@page "/"
+@using System.ComponentModel.DataAnnotations
+@inject HttpClient Http
+
+<h1>Support Dashboard</h1>
+
+<div class="glass card" style="margin-bottom:16px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div>
+            <div class="hint">Ticket overview</div>
+            <div style="margin-top:4px; font-size:18px; font-weight:650;">Today</div>
+        </div>
+        <button class="btn" @onclick="LoadDashboardAsync" disabled="@_dashboardLoading">@(_dashboardLoading ? "Refreshing…" : "Refresh")</button>
+    </div>
+
+    @if (_dashboardError is not null)
+    {
+        <div class="alert alert-danger" style="margin-top:12px;">@_dashboardError</div>
+    }
+
+    <div style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px;">
+        <div class="glass card" style="padding:14px;">
+            <div class="hint">Total tickets</div>
+            <div style="font-size:28px; font-weight:700; margin-top:2px;">@(_dashboard?.TotalTickets ?? 0)</div>
+        </div>
+        <div class="glass card" style="padding:14px;">
+            <div class="hint">In progress</div>
+            <div style="font-size:28px; font-weight:700; margin-top:2px;">@(_dashboard?.InProgressTickets ?? 0)</div>
+        </div>
+        <div class="glass card" style="padding:14px;">
+            <div class="hint">Unresolved</div>
+            <div style="font-size:28px; font-weight:700; margin-top:2px;">@(_dashboard?.UnresolvedTickets ?? 0)</div>
+        </div>
+    </div>
+</div>
+
+<h2 style="margin-top:0;">Log Support Ticket</h2>
+<p class="hint">Describe the issue and we’ll auto-assign it to an available support member.</p>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_response is not null)
+{
+    <div class="alert alert-success">
+        <strong>Ticket logged.</strong>
+        <div class="hint" style="margin-top:6px;">
+            Id: @_response.Id<br />
+            Assigned to: @_response.AssignedSupportMember<br />
+                Status: @_response.Status<br />
+                @if (_response.Tags is { Count: > 0 })
+                {
+                    <span>Tags: @string.Join(", ", _response.Tags)</span><br />
+                }
+                @if (!string.IsNullOrWhiteSpace(_response.AttachmentFileName))
+                {
+                    <span>Attachment: @_response.AttachmentFileName (@_response.AttachmentContentType)</span>
+                }
+        </div>
+    </div>
+}
+
+<EditForm Model="_model" OnValidSubmit="OnSubmitAsync" FormName="ticket-form">
+    <DataAnnotationsValidator />
+
+    <div class="glass card">
+        <div class="form">
+            <div class="field">
+                <label class="label" for="title">Title</label>
+                <InputText id="title" class="input" @bind-Value="_model.Title" disabled="@_isSubmitting" aria-invalid="@(_submitted && !string.IsNullOrWhiteSpace(_titleError))" />
+                <ValidationMessage class="validation" For="() => _model.Title" />
+            </div>
+
+            <div class="field">
+                <label class="label" for="desc">Description</label>
+                <InputTextArea id="desc" class="input" @bind-Value="_model.Description" disabled="@_isSubmitting" />
+                <ValidationMessage class="validation" For="() => _model.Description" />
+            </div>
+
+            <div class="field">
+                <label class="label" for="name">Your name</label>
+                <InputText id="name" class="input" @bind-Value="_model.RequesterName" disabled="@_isSubmitting" />
+                <ValidationMessage class="validation" For="() => _model.RequesterName" />
+            </div>
+
+            <div class="field">
+                <label class="label" for="tags">Tags</label>
+                <InputText id="tags" class="input" @bind-Value="_tagInput" disabled="@_isSubmitting" placeholder="e.g. billing, outage" />
+                <div class="hint" style="margin-top:4px;">Comma-separated list. Duplicates are removed.</div>
+            </div>
+
+            <div class="field">
+                <label class="label" for="attachment">Attachment</label>
+                <InputFile id="attachment" OnChange="OnFileSelectedAsync" disabled="@_isSubmitting" />
+                @if (!string.IsNullOrWhiteSpace(_attachmentFileName))
+                {
+                    <div class="hint" style="margin-top:4px;">Selected: @_attachmentFileName</div>
+                    <button class="btn" type="button" style="margin-top:6px;" @onclick="ClearAttachment" disabled="@_isSubmitting">Remove attachment</button>
+                }
+                @if (_attachmentError is not null)
+                {
+                    <div class="alert alert-danger" style="margin-top:6px;">@_attachmentError</div>
+                }
+            </div>
+
+            <div style="display:flex; gap:10px; align-items:center; margin-top:6px;">
+                <button class="btn btn-primary" type="submit" disabled="@_isSubmitting">
+                    @(_isSubmitting ? "Submitting…" : "Submit")
+                </button>
+                <button class="btn" type="button" disabled="@_isSubmitting" @onclick="Reset">
+                    Reset
+                </button>
+            </div>
+        </div>
+    </div>
+</EditForm>
+
+@code {
+    private CreateTicketRequest _model = new();
+    private TicketResponse? _response;
+    private string? _error;
+    private bool _isSubmitting;
+    private bool _submitted;
+
+    private DashboardResponse? _dashboard;
+    private bool _dashboardLoading;
+    private string? _dashboardError;
+
+    // Used only for aria-invalid hinting; ValidationMessage still provides the actual errors.
+    private string? _titleError;
+
+    private string _tagInput = string.Empty;
+    private string? _attachmentFileName;
+    private string? _attachmentContentType;
+    private string? _attachmentBase64;
+    private string? _attachmentError;
+    private const long MaxAttachmentSizeBytes = 5 * 1024 * 1024; // 5 MB
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        if (_dashboardLoading)
+        {
+            return;
+        }
+
+        _dashboardLoading = true;
+        _dashboardError = null;
+
+        try
+        {
+            using var response = await Http.GetAsync("api/tickets/dashboard");
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _dashboardError = $"Dashboard request failed: {(int)response.StatusCode} {response.ReasonPhrase}";
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    _dashboardError += $" - {body}";
+                }
+
+                return;
+            }
+
+            // If the API returns an HTML error page (often starts with '<'), JSON parsing will throw.
+            if (!string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
+            {
+                _dashboardError = $"Dashboard returned unexpected content type '{contentType ?? "(none)"}'.";
+                return;
+            }
+
+            _dashboard = System.Text.Json.JsonSerializer.Deserialize<DashboardResponse>(body, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _dashboardError = ex.Message;
+        }
+        finally
+        {
+            _dashboardLoading = false;
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (_isSubmitting)
+        {
+            return; // prevent double-submit
+        }
+
+        _submitted = true;
+        _error = null;
+        _response = null;
+        _titleError = string.IsNullOrWhiteSpace(_model.Title) ? "Title is required" : null;
+
+        _model.Tags = ParseTags(_tagInput);
+        _model.AttachmentFileName = _attachmentBase64 is null ? null : _attachmentFileName;
+        _model.AttachmentContentType = _attachmentBase64 is null ? null : _attachmentContentType;
+        _model.AttachmentBase64 = _attachmentBase64;
+
+        _isSubmitting = true;
+        try
+        {
+            using var result = await Http.PostAsJsonAsync("api/tickets", _model);
+            if (result.IsSuccessStatusCode)
+            {
+                _response = await result.Content.ReadFromJsonAsync<TicketResponse>();
+                _model = new();
+                _tagInput = string.Empty;
+                ClearAttachment();
+                _submitted = false;
+
+                // Refresh stats after creating a ticket
+                await LoadDashboardAsync();
+            }
+            else
+            {
+                var body = await result.Content.ReadAsStringAsync();
+                _error = string.IsNullOrWhiteSpace(body)
+                    ? $"Request failed: {result.StatusCode}"
+                    : $"Request failed: {result.StatusCode} - {body}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void Reset()
+    {
+        if (_isSubmitting)
+        {
+            return;
+        }
+
+        _model = new();
+        _response = null;
+        _error = null;
+        _submitted = false;
+        _titleError = null;
+        _tagInput = string.Empty;
+        ClearAttachment();
+    }
+
+    private IReadOnlyList<string>? ParseTags(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Array.Empty<string>();
+        }
+
+        var tags = raw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return tags.Count == 0 ? Array.Empty<string>() : tags;
+    }
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _attachmentError = null;
+        ClearAttachment();
+
+        var file = e.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.Size > MaxAttachmentSizeBytes)
+        {
+            _attachmentError = $"File is too large. Max {MaxAttachmentSizeBytes / (1024 * 1024)} MB.";
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxAttachmentSizeBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _attachmentBase64 = Convert.ToBase64String(ms.ToArray());
+            _attachmentFileName = file.Name;
+            _attachmentContentType = string.IsNullOrWhiteSpace(file.ContentType)
+                ? "application/octet-stream"
+                : file.ContentType;
+        }
+        catch (Exception ex)
+        {
+            _attachmentError = ex.Message;
+            ClearAttachment();
+        }
+    }
+
+    private void ClearAttachment()
+    {
+        _attachmentBase64 = null;
+        _attachmentFileName = null;
+        _attachmentContentType = null;
+        _attachmentError = null;
+    }
+
+    public sealed class CreateTicketRequest
+    {
+        [Required]
+        [StringLength(200, MinimumLength = 3)]
+        public string Title { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(2000, MinimumLength = 10)]
+        public string Description { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(200, MinimumLength = 2)]
+        public string RequesterName { get; set; } = string.Empty;
+
+        public string? AttachmentFileName { get; set; }
+        public string? AttachmentContentType { get; set; }
+        public string? AttachmentBase64 { get; set; }
+        public IReadOnlyList<string>? Tags { get; set; }
+    }
+
+    public sealed class TicketResponse
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string RequesterName { get; set; } = string.Empty;
+        public DateTime CreatedAtUtc { get; set; }
+        public string AssignedSupportMember { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? AttachmentFileName { get; set; }
+        public string? AttachmentContentType { get; set; }
+        public string? AttachmentBase64 { get; set; }
+        public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+    }
+
+    public sealed class DashboardResponse
+    {
+        public int TotalTickets { get; set; }
+        public int InProgressTickets { get; set; }
+        public int UnresolvedTickets { get; set; }
+    }
+}

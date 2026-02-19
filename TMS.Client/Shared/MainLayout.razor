@@ -1,0 +1,19 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-badge" aria-hidden="true"></div>
+                <div>TMS</div>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <a class="btn" href="/">Home</a>
+            </div>
+        </header>
+
+        <main class="glass content">
+            @Body
+        </main>
+    </div>
+</div>
